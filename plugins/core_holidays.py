@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import requests
 
 try:
     from lunardate import LunarDate
@@ -30,14 +31,35 @@ def nth_weekday(year, month, weekday, n):
     return d + timedelta(days=7 * (n - 1))
 
 
-def last_weekday(year, month, weekday):
-    if month < 12:
-        d = date(year, month + 1, 1) - timedelta(days=1)
-    else:
-        d = date(year, 12, 31)
-    while d.weekday() != weekday:
-        d -= timedelta(days=1)
-    return d
+def fetch_china_holidays(year):
+    """
+    自动抓取中国大陆节假日/调休。
+    使用 timor.tech 免费节假日 API；失败则返回空结果。
+    """
+    url = f"https://timor.tech/api/holiday/year/{year}"
+    try:
+        r = requests.get(url, timeout=12)
+        r.raise_for_status()
+        data = r.json()
+        holidays = data.get("holiday", {}) or {}
+    except Exception:
+        return [], []
+
+    holiday_days = []
+    work_days = []
+
+    for md, info in holidays.items():
+        d = date.fromisoformat(f"{year}-{md}")
+
+        name = info.get("name", "中国节假日")
+        is_holiday = info.get("holiday", False)
+
+        if is_holiday:
+            holiday_days.append((name, d))
+        else:
+            work_days.append((name, d))
+
+    return holiday_days, work_days
 
 
 GLOBAL_FIXED = {
@@ -45,99 +67,100 @@ GLOBAL_FIXED = {
     "02-14": "情人节",
     "03-08": "妇女节",
     "04-01": "愚人节",
+    "04-22": "世界地球日",
     "05-01": "劳动节",
     "06-01": "儿童节",
     "10-01": "国庆节",
+    "10-31": "万圣节",
+    "11-11": "光棍节",
+    "12-24": "平安夜",
     "12-25": "圣诞节",
 }
-
 
 LUNAR_FESTIVALS = [
     (1, 1, "春节"),
     (1, 15, "元宵节"),
+    (2, 2, "龙抬头"),
     (5, 5, "端午节"),
+    (7, 7, "七夕"),
+    (7, 15, "中元节"),
     (8, 15, "中秋节"),
     (9, 9, "重阳节"),
+    (12, 8, "腊八节"),
+    (12, 23, "北方小年"),
+    (12, 24, "南方小年"),
 ]
 
-
 SOLAR_TERMS_SAMPLE = {
-    "02-04": "立春",
-    "03-20": "春分",
-    "06-21": "夏至",
-    "09-23": "秋分",
-    "12-21": "冬至",
+    "01-05": "小寒", "01-20": "大寒",
+    "02-04": "立春", "02-19": "雨水",
+    "03-05": "惊蛰", "03-20": "春分",
+    "04-04": "清明", "04-20": "谷雨",
+    "05-05": "立夏", "05-21": "小满",
+    "06-05": "芒种", "06-21": "夏至",
+    "07-07": "小暑", "07-22": "大暑",
+    "08-07": "立秋", "08-23": "处暑",
+    "09-07": "白露", "09-23": "秋分",
+    "10-08": "寒露", "10-23": "霜降",
+    "11-07": "立冬", "11-22": "小雪",
+    "12-07": "大雪", "12-21": "冬至",
 }
 
 
 def add_rule_based_festivals(events, year):
     rules = [
-        ("👩 母亲节", nth_weekday(year, 5, 6, 2)),
-        ("👨 父亲节", nth_weekday(year, 6, 6, 3)),
-        ("🙏 感恩节", nth_weekday(year, 11, 3, 4)),
+        ("👩 母亲节", nth_weekday(year, 5, 6, 2), "每年5月第二个星期日"),
+        ("👨 父亲节", nth_weekday(year, 6, 6, 3), "每年6月第三个星期日"),
+        ("🙏 感恩节", nth_weekday(year, 11, 3, 4), "每年11月第四个星期四"),
+        ("💻 黑色星期五", nth_weekday(year, 11, 3, 4) + timedelta(days=1), "感恩节次日"),
     ]
 
-    for title, d in rules:
-        _add_event(events, title, d, "", "全球节日")
-
-
-def add_china_holidays(events):
-    HOLIDAYS_2026 = [
-        ("元旦休假", "2026-01-01", "2026-01-03"),
-        ("春节休假", "2026-02-15", "2026-02-23"),
-        ("清明节休假", "2026-04-04", "2026-04-06"),
-        ("劳动节休假", "2026-05-01", "2026-05-05"),
-        ("端午节休假", "2026-06-19", "2026-06-21"),
-        ("中秋节休假", "2026-09-25", "2026-09-27"),
-        ("国庆节休假", "2026-10-01", "2026-10-07"),
-    ]
-
-    WORKDAYS_2026 = [
-        "2026-01-04",
-        "2026-02-14",
-        "2026-02-28",
-        "2026-05-09",
-        "2026-09-20",
-        "2026-10-10",
-    ]
-
-    def add_range(title, start, end):
-        d = date.fromisoformat(start)
-        end_d = date.fromisoformat(end)
-        while d <= end_d:
-            _add_event(events, f"🇨🇳 {title}", d, "", "中国休假")
-            d += timedelta(days=1)
-
-    for title, s, e in HOLIDAYS_2026:
-        add_range(title, s, e)
-
-    for d in WORKDAYS_2026:
-        _add_event(events, "⚠️ 调休上班", date.fromisoformat(d), "", "补班")
+    for title, d, desc in rules:
+        _add_event(events, title, d, desc, "全球节日")
 
 
 def generate(config):
     events = []
     current_year = date.today().year
+    years_ahead = int(config.get("years_ahead", 5))
 
-    for y in range(current_year, current_year + 3):
+    for y in range(current_year, current_year + years_ahead):
         for md, name in GLOBAL_FIXED.items():
             m, d = map(int, md.split("-"))
-            _add_event(events, name, date(y, m, d))
+            _add_event(events, f"🌐 {name}", date(y, m, d), "", "全球节日")
 
         add_rule_based_festivals(events, y)
 
         for md, name in SOLAR_TERMS_SAMPLE.items():
             m, d = map(int, md.split("-"))
-            _add_event(events, f"节气：{name}", date(y, m, d))
+            _add_event(events, f"🌿 二十四节气：{name}", date(y, m, d), "节气日期为通用近似值。", "节气")
 
         if LunarDate:
             for lm, ld, name in LUNAR_FESTIVALS:
                 try:
                     sd = LunarDate(y, lm, ld).toSolarDate()
-                    _add_event(events, f"农历{name}", sd)
-                except:
+                    _add_event(events, f"🏮 农历{name}", sd, f"农历 {lm}月{ld}日", "农历节日")
+                except Exception:
                     pass
 
-    add_china_holidays(events)
+        holiday_days, work_days = fetch_china_holidays(y)
+
+        for name, d in holiday_days:
+            _add_event(
+                events,
+                f"🇨🇳 {name}休假",
+                d,
+                "自动抓取：中国大陆法定节假日/调休休假日。",
+                "中国休假"
+            )
+
+        for name, d in work_days:
+            _add_event(
+                events,
+                f"⚠️ {name}调休上班",
+                d,
+                "自动抓取：中国大陆调休补班日。",
+                "调休补班"
+            )
 
     return events
