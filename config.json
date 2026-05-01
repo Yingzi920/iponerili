@@ -1,0 +1,33 @@
+{
+  "timezone": "Asia/Shanghai",
+  "years_ahead": 5,
+  "calendar_name": "Ying的智能日历：农历·节假日·AI·电影·生活",
+  "owner": "Ying",
+  "enabled_plugins": [
+    "core_holidays",
+    "daily_life",
+    "ai_news",
+    "china_movies"
+  ],
+  "daily_life": {
+    "douyin_streak_time": "21:00",
+    "ai_briefing_time": "08:30",
+    "movie_digest_time": "19:30"
+  },
+  "sources": {
+    "openrouter_rankings": "https://openrouter.ai/rankings",
+    "openai_news": "https://openai.com/news/",
+    "codex": "https://github.com/openai/codex",
+    "openclaw_releases": "https://github.com/your-org/openclaw/releases",
+    "maoyan": "https://www.maoyan.com/films",
+    "taopiaopiao": "https://dianying.taobao.com/"
+  },
+  "extension_slots": {
+    "legal_deadlines": false,
+    "finance_bills": false,
+    "travel_itinerary": false,
+    "notion_sync": false,
+    "telegram_push": false,
+    "openclaw_bridge": false
+  }
+}
