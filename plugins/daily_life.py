@@ -4,24 +4,27 @@ from .base import CalendarEvent
 def plugin_name():
     return "daily_life"
 
-def _timed_event(title, day, hhmm, desc, cat):
+def _event(title, d, time):
     return CalendarEvent(
         title=title,
-        start=f"{day.isoformat()}T{hhmm}:00",
-        end=f"{day.isoformat()}T{hhmm}:00",
+        start=f"{d.isoformat()}T{time}:00",
         all_day=False,
-        description=desc,
-        categories=[cat],
-        uid_seed=f"{cat}-{title}-{day.isoformat()}-{hhmm}"
+        description="",
+        categories=["生活提醒"],
+        uid_seed=f"{title}-{d}-{time}"
     )
 
 def generate(config):
-    life = config.get("daily_life", {})
     today = date.today()
     events = []
-    for i in range(0, 370):
+
+    for i in range(0, 365):
         d = today + timedelta(days=i)
-        events.append(_timed_event("🔥 抖音续火花", d, life.get("douyin_streak_time", "21:00"), "每日固定提醒：打开抖音续火花。", "生活提醒"))
-        events.append(_timed_event("🤖 AI 简报：模型/ChatGPT/Codex/OpenClaw", d, life.get("ai_briefing_time", "08:30"), "动态内容由 ai_news 插件写入摘要缓存；此事件用于每天查看。", "AI简报"))
-        events.append(_timed_event("🎬 大陆院线电影速览", d, life.get("movie_digest_time", "19:30"), "动态内容由 china_movies 插件写入摘要缓存；此事件用于每天查看。", "电影"))
+
+        # 🔥 抖音续火花
+        events.append(_event("🔥 抖音续火花", d, "21:00"))
+
+        # 💊 吃药提醒
+        events.append(_event("💊 吃药提醒", d, "16:30"))
+
     return events
