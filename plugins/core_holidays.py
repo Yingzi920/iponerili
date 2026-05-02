@@ -34,47 +34,51 @@ def nth_weekday(year, month, weekday, n):
 def fetch_china_holidays(year):
     """
     自动抓取中国大陆节假日/调休。
-    使用 timor.tech 免费节假日 API；失败则返回空结果。
+    主源：timor.tech 节假日 API。
+    注意：该 API 官方说明最多配置到当前时间往后一年的节假日。
     """
-    url = f"https://timor.tech/api/holiday/year/{year}"
+    url = f"https://timor.tech/api/holiday/year/{year}?type=Y&week=N"
     try:
-        r = requests.get(url, timeout=12)
+        r = requests.get(url, timeout=15)
         r.raise_for_status()
         data = r.json()
-        holidays = data.get("holiday", {}) or {}
+        holiday_data = data.get("holiday", {}) or {}
     except Exception:
         return [], []
 
     holiday_days = []
     work_days = []
 
-    for md, info in holidays.items():
-        d = date.fromisoformat(f"{year}-{md}")
+    for md, info in holiday_data.items():
+        try:
+            d = date.fromisoformat(f"{year}-{md}")
+        except Exception:
+            continue
 
         name = info.get("name", "中国节假日")
-        is_holiday = info.get("holiday", False)
+        is_holiday = bool(info.get("holiday", False))
 
         if is_holiday:
             holiday_days.append((name, d))
         else:
             work_days.append((name, d))
 
-    return holiday_days, work_days
+    return sorted(holiday_days, key=lambda x: x[1]), sorted(work_days, key=lambda x: x[1])
 
 
 GLOBAL_FIXED = {
-    "01-01": "元旦",
-    "02-14": "情人节",
-    "03-08": "妇女节",
-    "04-01": "愚人节",
+    "01-01": "元旦 / New Year",
+    "02-14": "情人节 / Valentine’s Day",
+    "03-08": "国际妇女节",
+    "03-15": "消费者权益日",
+    "04-01": "愚人节 / April Fool’s Day",
     "04-22": "世界地球日",
-    "05-01": "劳动节",
+    "05-01": "劳动节 / Labour Day",
     "06-01": "儿童节",
-    "10-01": "国庆节",
-    "10-31": "万圣节",
-    "11-11": "光棍节",
-    "12-24": "平安夜",
-    "12-25": "圣诞节",
+    "10-31": "万圣节 / Halloween",
+    "11-11": "光棍节 / Singles’ Day",
+    "12-24": "平安夜 / Christmas Eve",
+    "12-25": "圣诞节 / Christmas",
 }
 
 LUNAR_FESTIVALS = [
@@ -107,16 +111,41 @@ SOLAR_TERMS_SAMPLE = {
 }
 
 
-def add_rule_based_festivals(events, year):
+def add_rule_based_global_festivals(events, year):
+    thanksgiving = nth_weekday(year, 11, 3, 4)
+
     rules = [
-        ("👩 母亲节", nth_weekday(year, 5, 6, 2), "每年5月第二个星期日"),
-        ("👨 父亲节", nth_weekday(year, 6, 6, 3), "每年6月第三个星期日"),
-        ("🙏 感恩节", nth_weekday(year, 11, 3, 4), "每年11月第四个星期四"),
-        ("💻 黑色星期五", nth_weekday(year, 11, 3, 4) + timedelta(days=1), "感恩节次日"),
+        ("👩 母亲节 / Mother’s Day", nth_weekday(year, 5, 6, 2), "每年5月第二个星期日"),
+        ("👨 父亲节 / Father’s Day", nth_weekday(year, 6, 6, 3), "每年6月第三个星期日"),
+        ("🙏 感恩节 / Thanksgiving", thanksgiving, "美国感恩节：每年11月第四个星期四"),
+        ("💻 黑色星期五 / Black Friday", thanksgiving + timedelta(days=1), "感恩节次日"),
+        ("🌐 网络星期一 / Cyber Monday", thanksgiving + timedelta(days=4), "感恩节后的星期一"),
     ]
 
     for title, d, desc in rules:
         _add_event(events, title, d, desc, "全球节日")
+
+
+def add_china_holidays(events, year):
+    holiday_days, work_days = fetch_china_holidays(year)
+
+    for name, d in holiday_days:
+        _add_event(
+            events,
+            f"🇨🇳 {name}休假",
+            d,
+            "联网自动抓取：中国大陆法定节假日/调休休假日。",
+            "中国休假"
+        )
+
+    for name, d in work_days:
+        _add_event(
+            events,
+            f"⚠️ {name}调休上班",
+            d,
+            "联网自动抓取：中国大陆调休补班日。",
+            "调休补班"
+        )
 
 
 def generate(config):
@@ -129,7 +158,7 @@ def generate(config):
             m, d = map(int, md.split("-"))
             _add_event(events, f"🌐 {name}", date(y, m, d), "", "全球节日")
 
-        add_rule_based_festivals(events, y)
+        add_rule_based_global_festivals(events, y)
 
         for md, name in SOLAR_TERMS_SAMPLE.items():
             m, d = map(int, md.split("-"))
@@ -143,24 +172,6 @@ def generate(config):
                 except Exception:
                     pass
 
-        holiday_days, work_days = fetch_china_holidays(y)
-
-        for name, d in holiday_days:
-            _add_event(
-                events,
-                f"🇨🇳 {name}休假",
-                d,
-                "自动抓取：中国大陆法定节假日/调休休假日。",
-                "中国休假"
-            )
-
-        for name, d in work_days:
-            _add_event(
-                events,
-                f"⚠️ {name}调休上班",
-                d,
-                "自动抓取：中国大陆调休补班日。",
-                "调休补班"
-            )
+        add_china_holidays(events, y)
 
     return events
