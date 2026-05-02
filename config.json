@@ -16,9 +16,9 @@
   },
   "sources": {
     "openrouter_rankings": "https://openrouter.ai/rankings",
-    "openai_news": "https://openai.com/news/",
-    "codex": "https://github.com/openai/codex",
-    "openclaw_releases": "https://github.com/your-org/openclaw/releases",
+    "openai_news": "https://openai.com/news/rss.xml",
+    "codex": "openai/codex",
+    "openclaw_repo": "",
     "maoyan": "https://www.maoyan.com/films",
     "taopiaopiao": "https://dianying.taobao.com/"
   },
