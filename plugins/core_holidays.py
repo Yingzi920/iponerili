@@ -31,85 +31,152 @@ def nth_weekday(year, month, weekday, n):
     return d + timedelta(days=7 * (n - 1))
 
 
+def daterange(start, end):
+    d = start
+    while d <= end:
+        yield d
+        d += timedelta(days=1)
+
+
+# 兜底：2026 官方放假调休
+CHINA_FALLBACK_HOLIDAYS = {
+    2026: [
+        ("元旦", "2026-01-01", "2026-01-03"),
+        ("春节", "2026-02-15", "2026-02-23"),
+        ("清明节", "2026-04-04", "2026-04-06"),
+        ("劳动节", "2026-05-01", "2026-05-05"),
+        ("端午节", "2026-06-19", "2026-06-21"),
+        ("中秋节", "2026-09-25", "2026-09-27"),
+        ("国庆节", "2026-10-01", "2026-10-07"),
+    ]
+}
+
+CHINA_FALLBACK_WORKDAYS = {
+    2026: [
+        ("元旦", "2026-01-04"),
+        ("春节", "2026-02-14"),
+        ("春节", "2026-02-28"),
+        ("劳动节", "2026-05-09"),
+        ("国庆节", "2026-09-20"),
+        ("国庆节", "2026-10-10"),
+    ]
+}
+
+
 def fetch_china_holidays(year):
     url = f"https://timor.tech/api/holiday/year/{year}"
-
-    try:
-        r = requests.get(url, timeout=12)
-        r.raise_for_status()
-        data = r.json().get("holiday", {})
-    except Exception:
-        return [], []
 
     holiday_days = []
     work_days = []
 
-    for md, info in data.items():
-        try:
-            d = date.fromisoformat(f"{year}-{md}")
-        except Exception:
-            continue
+    try:
+        r = requests.get(url, timeout=12)
+        r.raise_for_status()
+        data = r.json().get("holiday", {}) or {}
 
-        type_code = info.get("type", 0)
-        name = info.get("name", "")
+        for md, info in data.items():
+            try:
+                d = date.fromisoformat(f"{year}-{md}")
+            except Exception:
+                continue
 
-        # type=1 法定节假日
-        # type=2 周末，但如果带节日名，通常是连续假期中的休息日
-        if type_code == 1 or (type_code == 2 and name):
-            holiday_days.append((name or "假期", d))
-        elif type_code == 0 and name:
+            name = info.get("name", "假期")
+            type_code = info.get("type", 0)
+
+            if type_code == 1 or (type_code == 2 and name):
+                holiday_days.append((name, d))
+            elif type_code == 0 and name:
+                work_days.append((name, d))
+
+    except Exception:
+        pass
+
+    return holiday_days, work_days
+
+
+def apply_fallback_if_needed(year, holiday_days, work_days):
+    existing = {d for _, d in holiday_days}
+
+    for name, start_s, end_s in CHINA_FALLBACK_HOLIDAYS.get(year, []):
+        start = date.fromisoformat(start_s)
+        end = date.fromisoformat(end_s)
+
+        full_range = list(daterange(start, end))
+        missing_count = sum(1 for d in full_range if d not in existing)
+
+        # 只要这个假期区间缺任何一天，就用兜底补全整段
+        if missing_count > 0:
+            for d in full_range:
+                holiday_days.append((name, d))
+                existing.add(d)
+
+    existing_work = {d for _, d in work_days}
+    for name, day_s in CHINA_FALLBACK_WORKDAYS.get(year, []):
+        d = date.fromisoformat(day_s)
+        if d not in existing_work:
             work_days.append((name, d))
 
-    return sorted(holiday_days, key=lambda x: x[1]), sorted(work_days, key=lambda x: x[1])
+    return holiday_days, work_days
 
 
-def expand_ranges(days):
-    if not days:
+def merge_same_day(items):
+    result = {}
+    for name, d in items:
+        result.setdefault(d, name)
+    return [(name, d) for d, name in result.items()]
+
+
+def group_ranges(items):
+    if not items:
         return []
 
-    days = sorted(days, key=lambda x: x[1])
+    items = sorted(items, key=lambda x: x[1])
     ranges = []
 
-    start_name, start_date = days[0]
-    prev_date = start_date
+    start_name, start = items[0]
+    prev = start
 
-    for name, d in days[1:]:
-        if (d - prev_date).days == 1:
-            prev_date = d
+    for name, d in items[1:]:
+        if (d - prev).days == 1 and name == start_name:
+            prev = d
         else:
-            ranges.append((start_name, start_date, prev_date))
-            start_name, start_date = name, d
-            prev_date = d
+            ranges.append((start_name, start, prev))
+            start_name, start = name, d
+            prev = d
 
-    ranges.append((start_name, start_date, prev_date))
+    ranges.append((start_name, start, prev))
     return ranges
 
 
 def add_china_holidays(events, year):
     holiday_days, work_days = fetch_china_holidays(year)
+    holiday_days, work_days = apply_fallback_if_needed(year, holiday_days, work_days)
 
-    for name, start, end in expand_ranges(holiday_days):
+    holiday_days = merge_same_day(holiday_days)
+    work_days = merge_same_day(work_days)
+
+    for name, start, end in group_ranges(holiday_days):
         total = (end - start).days + 1
         d = start
-        index = 1
+        idx = 1
 
         while d <= end:
             _add_event(
                 events,
-                f"🇨🇳 {name}休假（第{index}/{total}天）",
+                f"🇨🇳 {name}休假（第{idx}/{total}天）",
                 d,
-                f"{start} 至 {end}，联网自动抓取：中国大陆法定节假日/调休休假日。",
+                f"{start} 至 {end}。联网抓取，不完整时自动兜底补全。",
                 "中国休假"
             )
             d += timedelta(days=1)
-            index += 1
+            idx += 1
 
     for name, d in work_days:
         _add_event(
             events,
             f"⚠️ {name}调休上班",
             d,
-            "联网自动抓取：中国大陆调休补班日。",
+            "中国大陆调休补班日。",
             "调休补班"
         )
 
@@ -130,7 +197,6 @@ GLOBAL_FIXED = {
     "12-25": "圣诞节 / Christmas",
 }
 
-
 LUNAR_FESTIVALS = [
     (1, 1, "春节"),
     (1, 15, "元宵节"),
@@ -144,7 +210,6 @@ LUNAR_FESTIVALS = [
     (12, 23, "北方小年"),
     (12, 24, "南方小年"),
 ]
-
 
 SOLAR_TERMS_SAMPLE = {
     "01-05": "小寒", "01-20": "大寒",
@@ -162,7 +227,13 @@ SOLAR_TERMS_SAMPLE = {
 }
 
 
-def add_rule_based_global_festivals(events, year):
+def add_global_fixed(events, year):
+    for md, name in GLOBAL_FIXED.items():
+        m, d = map(int, md.split("-"))
+        _add_event(events, f"🌐 {name}", date(year, m, d), "", "全球节日")
+
+
+def add_rule_based_global(events, year):
     thanksgiving = nth_weekday(year, 11, 3, 4)
 
     rules = [
@@ -177,21 +248,8 @@ def add_rule_based_global_festivals(events, year):
         _add_event(events, title, d, desc, "全球节日")
 
 
-def add_global_fixed(events, year):
-    for md, name in GLOBAL_FIXED.items():
-        m, d = map(int, md.split("-"))
-        _add_event(events, f"🌐 {name}", date(year, m, d), "", "全球节日")
-
-
-def add_lunar_festivals(events, year):
+def add_lunar(events, year):
     if LunarDate is None:
-        _add_event(
-            events,
-            "🏮 农历节日模块待依赖安装后启用",
-            date(year, 1, 1),
-            "请确认 requirements.txt 中存在 lunardate>=0.2.2。",
-            "农历节日"
-        )
         return
 
     for lm, ld, name in LUNAR_FESTIVALS:
@@ -205,13 +263,7 @@ def add_lunar_festivals(events, year):
 def add_solar_terms(events, year):
     for md, name in SOLAR_TERMS_SAMPLE.items():
         m, d = map(int, md.split("-"))
-        _add_event(
-            events,
-            f"🌿 二十四节气：{name}",
-            date(year, m, d),
-            "节气日期为通用近似值。",
-            "节气"
-        )
+        _add_event(events, f"🌿 二十四节气：{name}", date(year, m, d), "节气日期为通用近似值。", "节气")
 
 
 def generate(config):
@@ -221,8 +273,8 @@ def generate(config):
 
     for year in range(current_year, current_year + years_ahead):
         add_global_fixed(events, year)
-        add_rule_based_global_festivals(events, year)
-        add_lunar_festivals(events, year)
+        add_rule_based_global(events, year)
+        add_lunar(events, year)
         add_solar_terms(events, year)
         add_china_holidays(events, year)
 
